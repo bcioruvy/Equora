@@ -16,41 +16,55 @@ function nextOccurrence(date, recurrence) {
   }
 }
 
-/**
- * Computes nextDueDate for recurring transactions (for the Upcoming Bills
- * widget) and raises in-app notifications for budgets exceeded, bills due
- * soon, and goal milestones reached. Runs once per data refresh, guarded
- * so it doesn't spam duplicate notifications.
- */
+function computeStableDueDate(baseDate, recurrence) {
+  let due = nextOccurrence(baseDate, recurrence);
+  if (!due) return null;
+  const now = new Date();
+  let guard = 0;
+  while (isBefore(due, now) && guard < 1000) {
+    const advanced = nextOccurrence(due, recurrence);
+    if (!advanced) break;
+    due = advanced;
+    guard += 1;
+  }
+  return due;
+}
+
 export function useFinancialAutomation() {
   const { user, profile } = useAuth();
   const { transactions, activeBudgets, goals, notifications } = useData();
   const processedRef = useRef(new Set());
 
-  // Keep recurring transactions' nextDueDate fresh
   useEffect(() => {
     if (!user) return;
     transactions
       .filter((t) => t.recurrence && t.recurrence !== 'none')
       .forEach((t) => {
+        const writeGuardKey = `recurdate-${t.id}`;
+        if (processedRef.current.has(writeGuardKey)) return;
+
         const baseDate = typeof t.date === 'string' ? parseISO(t.date) : new Date(t.date);
-        let due = t.nextDueDate ? parseISO(t.nextDueDate) : nextOccurrence(baseDate, t.recurrence);
-        if (due && isBefore(due, new Date())) {
-          due = nextOccurrence(due, t.recurrence);
-        }
+        const storedDue = t.nextDueDate ? parseISO(t.nextDueDate) : null;
+        const needsRecompute = !storedDue || isBefore(storedDue, new Date());
+        if (!needsRecompute) return;
+
+        const due = computeStableDueDate(storedDue || baseDate, t.recurrence);
         const dueStr = due?.toISOString().slice(0, 10);
         if (due && dueStr !== t.nextDueDate) {
-          updateTransaction(user.uid, t.id, { nextDueDate: dueStr }).catch(() => {});
+          processedRef.current.add(writeGuardKey);
+          updateTransaction(user.uid, t.id, { nextDueDate: dueStr }).catch(() => {
+            processedRef.current.delete(writeGuardKey);
+          });
         }
       });
   }, [user, transactions]);
 
-  // Budget exceeded alerts
   useEffect(() => {
     if (!user) return;
     activeBudgets.forEach((b) => {
       const key = `budget-${b.id}-exceeded`;
       if (b.percentUsed >= 100 && !processedRef.current.has(key)) {
+        processedRef.current.add(key);
         const alreadyExists = notifications.some((n) => n.dedupeKey === key);
         if (!alreadyExists) {
           addNotification(user.uid, {
@@ -58,14 +72,14 @@ export function useFinancialAutomation() {
             message: `You've exceeded your "${b.name}" budget.`,
             dedupeKey: key,
             read: false,
-          }).catch(() => {});
+          }).catch(() => {
+            processedRef.current.delete(key);
+          });
         }
-        processedRef.current.add(key);
       }
     });
   }, [user, activeBudgets, notifications]);
 
-  // Upcoming bill reminders (due within 3 days)
   useEffect(() => {
     if (!user) return;
     const soon = addDays(new Date(), 3);
@@ -75,6 +89,7 @@ export function useFinancialAutomation() {
         const due = parseISO(t.nextDueDate);
         const key = `bill-${t.id}-${t.nextDueDate}`;
         if (isBefore(due, soon) && isAfter(due, new Date()) && !processedRef.current.has(key)) {
+          processedRef.current.add(key);
           const alreadyExists = notifications.some((n) => n.dedupeKey === key);
           if (!alreadyExists) {
             addNotification(user.uid, {
@@ -82,14 +97,14 @@ export function useFinancialAutomation() {
               message: `${getCategoryById(t.category).label} bill of ${formatMoney(t.amount, profile?.currency || 'USD')} is due soon.`,
               dedupeKey: key,
               read: false,
-            }).catch(() => {});
+            }).catch(() => {
+              processedRef.current.delete(key);
+            });
           }
-          processedRef.current.add(key);
         }
       });
   }, [user, transactions, notifications, profile]);
 
-  // Savings goal milestones (25/50/75/100%)
   useEffect(() => {
     if (!user) return;
     goals.forEach((g) => {
@@ -97,6 +112,7 @@ export function useFinancialAutomation() {
       [25, 50, 75, 100].forEach((milestone) => {
         const key = `goal-${g.id}-${milestone}`;
         if (pct >= milestone && !processedRef.current.has(key)) {
+          processedRef.current.add(key);
           const alreadyExists = notifications.some((n) => n.dedupeKey === key);
           if (!alreadyExists) {
             addNotification(user.uid, {
@@ -107,9 +123,10 @@ export function useFinancialAutomation() {
                   : `You're ${milestone}% of the way to your "${g.name}" goal.`,
               dedupeKey: key,
               read: false,
-            }).catch(() => {});
+            }).catch(() => {
+              processedRef.current.delete(key);
+            });
           }
-          processedRef.current.add(key);
         }
       });
     });

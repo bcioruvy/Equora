@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
-import { Menu, Bell, AlertTriangle, Calendar, Target, TrendingUp } from 'lucide-react';
+import { Menu, Bell, AlertTriangle, Calendar, Target, TrendingUp, X } from 'lucide-react';
 import { useData } from '../../context/DataContext';
+import { useAuth } from '../../context/AuthContext';
+import { deleteNotification } from '../../firebase/firestore';
 import './TopBar.css';
 
 const ICONS = {
@@ -12,6 +14,7 @@ const ICONS = {
 
 export function TopBar({ title, subtitle, onOpenMobileMenu, actions }) {
   const { notifications } = useData();
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const popRef = useRef(null);
   const unreadCount = notifications.filter((n) => !n.read).length;
@@ -23,6 +26,16 @@ export function TopBar({ title, subtitle, onOpenMobileMenu, actions }) {
     document.addEventListener('mousedown', handleClick);
     return () => document.removeEventListener('mousedown', handleClick);
   }, [open]);
+
+  function handleDismiss(id) {
+    if (!user) return;
+    deleteNotification(user.uid, id).catch(() => {});
+  }
+
+  function handleClearAll() {
+    if (!user) return;
+    notifications.forEach((n) => deleteNotification(user.uid, n.id).catch(() => {}));
+  }
 
   return (
     <header className="eq-topbar">
@@ -49,7 +62,14 @@ export function TopBar({ title, subtitle, onOpenMobileMenu, actions }) {
           </button>
           {open && (
             <div className="eq-topbar__dropdown" role="menu">
-              <div className="eq-topbar__dropdown-header">Notifications</div>
+              <div className="eq-topbar__dropdown-header">
+                <span>Notifications</span>
+                {notifications.length > 0 && (
+                  <button className="eq-topbar__clear-all" onClick={handleClearAll}>
+                    Clear all
+                  </button>
+                )}
+              </div>
               {notifications.length === 0 ? (
                 <p className="eq-topbar__empty">You're all caught up.</p>
               ) : (
@@ -60,6 +80,13 @@ export function TopBar({ title, subtitle, onOpenMobileMenu, actions }) {
                       <li key={n.id} className={`eq-topbar__item ${!n.read ? 'eq-topbar__item--unread' : ''}`}>
                         <Icon size={15} />
                         <span>{n.message}</span>
+                        <button
+                          className="eq-topbar__item-dismiss"
+                          onClick={() => handleDismiss(n.id)}
+                          aria-label="Dismiss notification"
+                        >
+                          <X size={13} />
+                        </button>
                       </li>
                     );
                   })}
