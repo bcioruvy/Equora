@@ -1,0 +1,19 @@
+{
+  "name": "Equora — Personal Finance, Balanced",
+  "short_name": "Equora",
+  "description": "Track income, expenses, budgets, and savings goals with clarity.",
+  "start_url": "/app/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0F1B2D",
+  "theme_color": "#0F1B2D",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/equora-mark.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
